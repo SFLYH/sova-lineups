@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>猎枭探测箭点位 · 瓦罗兰特</title>
+    <style>
+        :root { --bg: #1a1a1f; --panel-bg: #222228; --border: #333340; --text: #d0d0d8; --text-secondary: #9a9aa5; --accent: #e8453c; --hover: #2a2a35; --card-bg: #262630; --btn-active: #333345; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; user-select: none; -webkit-tap-highlight-color: transparent; overflow: hidden; }
+        .header { background: var(--panel-bg); border-bottom: 1px solid var(--border); padding: 10px 20px; display: flex; align-items: center; gap: 12px; flex-shrink: 0; z-index: 20; }
+        .header .logo { font-size: 1.2rem; font-weight: 700; letter-spacing: 0.5px; color: #f0b840; }
+        .header .subtitle { font-size: 0.8rem; color: var(--text-secondary); margin-left: 4px; }
+        .main-container { display: flex; flex: 1; overflow: hidden; position: relative; }
+        .sidebar { width: 220px; min-width: 220px; background: var(--panel-bg); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow-y: auto; flex-shrink: 0; z-index: 10; }
+        .sidebar-section { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+        .sidebar-section h3 { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px; color: var(--text-secondary); margin-bottom: 8px; }
+        .map-card { background: var(--card-bg); border: 1px solid transparent; border-radius: 6px; padding: 8px 12px; margin-bottom: 6px; cursor: pointer; transition: all 0.2s; font-size: 0.85rem; }
+        .map-card:hover { border-color: #555; background: var(--hover); }
+        .map-card.active { border-color: var(--accent); background: #2a1f1f; color: #fff; }
+        .viewer { flex: 1; display: flex; flex-direction: column; position: relative; background: #121217; overflow: hidden; }
+        .map-viewport { flex: 1; position: relative; overflow: auto; display: flex; align-items: center; justify-content: center; padding: 20px; }
+        .map-container { position: relative; display: inline-block; line-height: 0; cursor: default; }
+        .map-image { display: block; max-width: 100%; max-height: 70vh; height: auto; border-radius: 4px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6); background-color: rgba(0,0,0,0.3);}
+        .range-svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 4; }
+        .spot-marker { position: absolute; transform: translate(-50%, -50%); width: 22px; height: 22px; background: transparent; border: 2px solid currentColor; border-radius: 50%; box-shadow: 0 0 10px currentColor; cursor: pointer; transition: transform 0.15s, box-shadow 0.15s; z-index: 5; color: #f04c3e; }
+        .spot-marker::before, .spot-marker::after { content: ''; position: absolute; background: currentColor; }
+        .spot-marker::before { width: 2px; height: 10px; top: 4px; left: 8px; }
+        .spot-marker::after { width: 10px; height: 2px; top: 8px; left: 4px; }
+        .spot-marker:hover { transform: translate(-50%, -50%) scale(1.5); box-shadow: 0 0 16px currentColor; z-index: 6; }
+        .hover-label { position: absolute; pointer-events: none; z-index: 7; background: transparent; color: white; font-size: 0.8rem; padding: 2px 6px; border-radius: 3px; white-space: nowrap; display: none; }
+        .hover-label.range-desc { background: transparent; color: #f04c3e; font-size: 1rem; }
+
+        /* 覆盖层优化：不再固定居中，改为从上开始，并允许内部滚动 */
+        .overlay {
+            position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.85); z-index: 50;
+            display: flex; flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;    /* 从顶部开始排列 */
+            gap: 20px;
+            padding: 60px 20px 30px;
+            opacity: 0; pointer-events: none;
+            transition: opacity 0.25s;
+            overflow-y: auto;              /* 整个覆盖层可滚动 */
+            overflow-x: hidden;
+        }
+        .overlay.active { opacity: 1; pointer-events: auto; }
+        .overlay-close { position: fixed; top: 20px; right: 30px; background: #333; border: none; color: white; font-size: 1.5rem; width: 40px; height: 40px; border-radius: 50%; cursor: pointer; z-index: 60; transition: background 0.2s; }
+        .overlay-close:hover { background: #e8453c; }
+        .overlay-images {
+            display: flex; gap: 20px; flex-wrap: wrap;
+            align-items: flex-start; justify-content: center;
+            margin-bottom: 10px;
+            max-height: 70vh;              /* 限制图片区域高度，防止挤出屏幕 */
+            overflow-y: auto;              /* 若图片组超出可单独滚动 */
+        }
+        .overlay-img-wrapper {
+            display: flex; flex-direction: column; align-items: center;
+            gap: 6px; background: #1e1e24; border-radius: 8px; padding: 10px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+            transition: transform 0.1s ease; overflow: visible;
+        }
+        .overlay-img-wrapper img {
+            display: block; max-width: 45vw; max-height: 50vh;
+            height: auto; border-radius: 4px;
+        }
+        .overlay-text {
+            color: #ddd; font-size: 1.5rem; text-align: center;
+            padding: 6px 12px; background: rgba(0, 0, 0, 0.7);
+            border-radius: 6px; max-width: 600px; flex-shrink: 0;
+        }
+        .zoom-hint { color: #aaa; font-size: 0.7rem; background: rgba(0, 0, 0, 0.6); padding: 4px 10px; border-radius: 12px; pointer-events: none; flex-shrink: 0; }
+        .coord-toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: #f0b840; color: #000; font-weight: bold; padding: 8px 18px; border-radius: 20px; z-index: 100; font-size: 0.85rem; pointer-events: none; opacity: 0; transition: opacity 0.3s; }
+
+        /* 落点视野覆盖层（同样优化） */
+        .vision-overlay {
+            position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.85); z-index: 50;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: flex-start;
+            gap: 20px; padding: 60px 20px 30px;
+            opacity: 0; pointer-events: none;
+            transition: opacity 0.25s;
+            overflow-y: auto; overflow-x: hidden;
+        }
+        .vision-overlay.active { opacity: 1; pointer-events: auto; }
+        .vision-img-wrapper {
+            display: flex; flex-direction: column; align-items: center;
+            gap: 6px; background: #1e1e24; border-radius: 8px; padding: 10px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+            transition: transform 0.1s ease; overflow: visible;
+            max-height: 80vh; overflow-y: auto;
+        }
+        .vision-img-wrapper img {
+            display: block; max-width: 85vw; max-height: 75vh;
+            height: auto; border-radius: 4px;
+        }
+
+        @media (max-width: 768px) {
+            .main-container { flex-direction: column; }
+            .sidebar { width: 100%; min-width: 100%; max-height: 140px; flex-direction: row; flex-wrap: wrap; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--border); }
+            .sidebar-section { display: flex; gap: 6px; border-bottom: none; }
+            .map-card { display: inline-block; white-space: nowrap; }
+            .overlay-images { flex-direction: column; max-height: 60vh; }
+            .overlay-img-wrapper img { max-width: 80vw; max-height: 35vh; }
+            .vision-img-wrapper img { max-width: 90vw; max-height: 60vh; }
+        }
+        .usage-tip {
+    background: #2a2a35;
+    border-bottom: 1px solid #444;
+    color: #ddd;
+    font-size: 0.85rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 20px;
+    gap: 16px;
+    flex-shrink: 0;
+    z-index: 19;
+}
+.usage-tip kbd {
+    background: #333;
+    border: 1px solid #666;
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-size: 0.8rem;
+    color: #f0b840;
+}
+.tip-close {
+    background: none;
+    border: none;
+    color: #aaa;
+    font-size: 1.2rem;
+    cursor: pointer;
+    margin-left: auto;
+}
+.tip-close:hover { color: white; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <span class="logo">🏹 猎枭探测箭点位</span>
+        <span class="subtitle">空格固定轨迹 · Tab切换方案 · 点击落点看视野</span>
+    </div>
+    <div class="usage-tip" id="usageTip">
+    <div class="tip-content">
+        <strong>🕹️ 操作指南</strong>
+        <span>悬停十字准星查看点位 | 按 <kbd>Tab</kbd> 切换方案 | 按 <kbd>空格</kbd> 固定轨迹 | 固定后点击落点看视野 </span>
+    </div>
+    <button class="tip-close" id="tipClose">✕</button>
+</div>
+
+    <div class="main-container">
+        <div class="sidebar" id="sidebar">
+            <div class="sidebar-section">
+                <h3>🗺️ 选择地图</h3>
+                <div id="mapList"></div>
+            </div>
+        </div>
+
+        <div class="viewer" id="viewer">
+            <div class="map-viewport" id="mapViewport">
+                <div class="map-container" id="mapContainer">
+                    <img class="map-image" id="mapImage" src="" alt="地图" />
+                    <svg class="range-svg" id="rangeSvg" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
+                    <div class="hover-label" id="spotTooltip"></div>
+                    <div class="hover-label range-desc" id="rangeDescLabel"></div>
+                </div>
+            </div>
+
+            <div class="overlay" id="overlay">
+                <button class="overlay-close" id="overlayClose">✕</button>
+                <div class="overlay-images" id="overlayImages"></div>
+                <div class="overlay-text" id="overlayText"></div>
+                <div class="zoom-hint" id="zoomHint">🖱️ 鼠标滚轮缩放图片 | 点击✕关闭</div>
+            </div>
+
+            <div class="vision-overlay" id="visionOverlay">
+                <button class="overlay-close" id="visionOverlayClose">✕</button>
+                <div class="vision-img-wrapper" data-scale="1">
+                    <img id="visionImage" src="" alt="落点视野" />
+                </div>
+                <div class="zoom-hint">🖱️ 鼠标滚轮缩放视野图 | 点击✕关闭</div>
+            </div>
+        </div>
+    </div>
+    <div class="coord-toast" id="coordToast"></div>
+
+    <script>
+        (function() {
+            const mapsData = [{
+                id: 'map1',
+                name: '隐世修所',
+                imageUrl: 'HAVEN/隐世修所缩略图.png',
+                backgroundUrl: 'HAVEN/隐世修所加载图.png',   // ← 新增：真实场景背景图
+                spots: [
+                    {
+                        id: 'spot1',
+                        xPercent: 48.5, yPercent: 12,
+                        color: '#3b8beb',
+                        label: 'A点防守箭1',
+                        description: '贴近树枝阴影  瞄准砖堆第二个缺口偏下  3蓄力  2反弹',
+                        standImageUrl: 'HAVEN/A点防守箭站位1.png',
+                        aimImageUrl: 'HAVEN/A点防守箭1.png',
+                        variants: [
+                            {
+                                impactXPercent: 61.3, impactYPercent: 33.8,
+                                rangeDescription: '横梁上，覆盖A大及A厅',
+                                waypoints: [ { xPercent: 61.2, yPercent: 18.8 }, { xPercent: 61.2, yPercent: 27.2 } ],
+                                svgRange: { type: 'circle', radius: 20, stroke: '#0097a7' },
+                                visionImageUrl: 'HAVEN/A点防守箭1_视野.png'
+                            },
+                        ]
+                    },
+                    {
+                        id: 'spot2',
+                        xPercent: 44.3, yPercent: 18.3,
+                        color: '#3b8beb',
+                        label: 'A点防守箭2',
+                        description: '贴近货箱右端  反弹格与太阳形成笑脸  1蓄力  0反弹',
+                        standImageUrl: 'HAVEN/A点防守箭站位2.png',
+                        aimImageUrl: 'HAVEN/A点防守箭2.png',
+                        impactXPercent: 79.2, impactYPercent: 39.0,
+                        rangeDescription: '墙檐上，覆盖A花园及A厅',
+                        visionImageUrl: 'HAVEN/A点防守箭2_视野.png',
+                        svgRange: { type: 'circle', radius: 20, stroke: '#0097a7' }
+                    },
+                    {
+                        id: 'spot3',
+                        xPercent: 40.9, yPercent: 46.2,
+                        color: '#3b8beb',
+                        label: 'B看A花园1',
+                        description: '贴近B包铁箱左侧  瞄准窗口下端  3蓄力  1反弹',
+                        standImageUrl: 'HAVEN/B看A花园站位1.png',
+                        aimImageUrl: 'HAVEN/B看A花园1.png',
+                        impactXPercent: 83.8, impactYPercent: 36.0,
+                        rangeDescription: '树叶上，覆盖A花园及部分A厅',
+                        visionImageUrl: 'HAVEN/B看A花园1_视野.png',
+                        waypoints: [ { xPercent: 54.6, yPercent: 54.4 } ],
+                        svgRange: { type: 'circle', radius: 20, stroke: '#f0b840' }
+                    },
+                    {
+                        id: 'spot4',
+                        xPercent: 34.3, yPercent: 57.2,
+                        color: '#3b8beb',
+                        label: 'B看A花园2',
+                        description: '贴近B包右侧门右边  瞄准触手花纹右端  2蓄力  0反弹',
+                        standImageUrl: 'HAVEN/B看A花园站位2.png',
+                        aimImageUrl: 'HAVEN/B看A花园2.png',
+                        impactXPercent: 78.7, impactYPercent: 38.7,
+                        rangeDescription: '树枝上，覆盖A花园及部分A厅',
+                        visionImageUrl: 'HAVEN/B看A花园2_视野.png',
+                        svgRange: { type: 'circle', radius: 20, stroke: '#f0b840' }
+                    },
+                    {
+                        id: 'spot5',
+                        xPercent: 46.1, yPercent: 8.5,
+                        color: '#3b8beb',
+                        label: 'A包回防C包',
+                        description: 'A包死点  左反弹条顶端对准屋顶  2蓄力  0反弹',
+                        standImageUrl: 'HAVEN/A包回防C包站位.png',
+                        aimImageUrl: 'HAVEN/A包回防C包.png',
+                        impactXPercent: 50, impactYPercent: 89.8,
+                        rangeDescription: '墙壁上，覆盖C包大部分',
+                        visionImageUrl: 'HAVEN/A包回防C包_视野.png',
+                        svgRange: { type: 'circle', radius: 20, stroke: '#0097a7' }
+                    },
+                    {
+                        id: 'spot7',
+                        xPercent: 26.4, yPercent: 63.4,
+                        color: '#3b8beb',
+                        label: 'C外探车库',
+                        description: '贴近木门  瞄准梯形正上方  3蓄力  2反弹',
+                        standImageUrl: 'HAVEN/C外探车库站位.png',
+                        aimImageUrl: 'HAVEN/C外探车库.png',
+                        impactXPercent: 46, impactYPercent: 66.7,
+                        rangeDescription: '地砖上，覆盖C车库',
+                        visionImageUrl: 'HAVEN/C外探车库_视野.png',
+                        waypoints: [ { xPercent: 39.4, yPercent: 92.1 }, { xPercent: 48.4, yPercent: 72.0 } ],
+                        svgRange: { type: 'circle', radius: 20, stroke: '#00ffff' }
+                    },
+                    {
+                        id: 'spot8',
+                        xPercent: 40.3, yPercent: 78.5,
+                        color: '#3b8beb',
+                        label: 'C点防守箭',
+                        description: '贴近夹角 瞄准蓝墙边缘偏下 3蓄力 2反弹',
+                        standImageUrl: 'HAVEN/C点防守箭站位.png',
+                        aimImageUrl: 'HAVEN/C点防守箭1.png',
+                        variants: [
+                            {
+                                impactXPercent: 68.7, impactYPercent: 76.8,
+                                rangeDescription: '门框上，覆盖C厅C长后点',
+                                visionImageUrl: 'HAVEN/C点防守箭_视野1.png',
+                                waypoints: [ { xPercent: 58.8, yPercent: 85.5 }, { xPercent: 74.7, yPercent: 79.4 } ],
+                                svgRange: { type: 'circle', radius: 20, stroke: '#00ffff' }
+                            },
+                            {
+                                impactXPercent: 75.4, impactYPercent: 78.0,
+                                rangeDescription: '树枝上，覆盖C长后点',
+                                description: '贴近夹角 瞄准白墙边缘中点 3蓄力 2反弹',
+                                standImageUrl: 'HAVEN/C点防守箭站位.png',
+                                aimImageUrl: 'HAVEN/C点防守箭2.png',
+                                visionImageUrl: 'HAVEN/C点防守箭_视野2.png',
+                                waypoints: [ { xPercent: 58.8, yPercent: 85.5 }, { xPercent: 75.3, yPercent: 77.7 } ],
+                                svgRange: { type: 'circle', radius: 20, stroke: '#00ffff' }
+                            },
+                            {
+                                impactXPercent: 67.8, impactYPercent: 75.3,
+                                rangeDescription: '屋檐边，覆盖C厅C长后点',
+                                description: '贴近夹角 蓄力条有上端对准屋顶突出右下角上一点 1蓄力 0反弹',
+                                standImageUrl: 'HAVEN/C点防守箭站位.png',
+                                aimImageUrl: 'HAVEN/C点防守箭3.png',
+                                visionImageUrl: 'HAVEN/C点防守箭_视野3.png',
+                                svgRange: { type: 'circle', radius: 20, stroke: '#00ffff' }
+                            }
+                        ]
+                    },
+                    {
+                        id: 'spot9',
+                        xPercent: 37.0, yPercent: 92.0,
+                        color: '#3b8beb',
+                        label: 'C包回防A包',
+                        description: '贴近两箱夹角 第二条蓄力条右上角对准塔尖 2蓄力 0反弹',
+                        standImageUrl: 'HAVEN/C包回防A包站位.png',
+                        aimImageUrl: 'HAVEN/C包回防A包.png',
+                        impactXPercent: 44.0, impactYPercent: 8.5,
+                        rangeDescription: '墙檐边，覆盖A包部分区域',
+                        visionImageUrl: 'HAVEN/C点回防A包_视野.png',
+                        svgRange: { type: 'circle', radius: 20, stroke: '#00ffff' }
+                    },
+                    {
+                        id: 'spot10',
+                        xPercent: 70, yPercent: 60,
+                        color: '#f04c3e',
+                        label: 'B点站位',
+                        description: 'B点入口左侧墙壁反弹，可探测B包点内部。',
+                        standImageUrl: 'https://via.placeholder.com/600x400/1e3a1e/ffffff?text=站位示范+B',
+                        aimImageUrl: 'https://via.placeholder.com/600x400/3a1e1e/ffffff?text=瞄准方向+B',
+                        impactXPercent: 85, impactYPercent: 50,
+                        rangeDescription: '圆形扫描，覆盖B包点中央',
+                        svgRange: { type: 'circle', radius: 20, stroke: '#0097a7' }
+                    }
+                ]
+            }, {
+                id: 'map2',
+                name: '热带乐园 (Bind)',
+                imageUrl: 'https://via.placeholder.com/1200x800/4a2a3a/ffffff?text=Bind+Map',
+                spots: [{
+                    id: 'spot3',
+                    xPercent: 25, yPercent: 40,
+                    color: '#f0b840',
+                    label: 'A点传送门站位',
+                    description: '利用传送门右侧墙壁，反弹探测A点区域。',
+                    standImageUrl: 'https://via.placeholder.com/600x400/2a3a1e/ffffff?text=站位+Bind+A',
+                    aimImageUrl: 'https://via.placeholder.com/600x400/3a2a1e/ffffff?text=瞄准+Bind+A',
+                    impactXPercent: 50, impactYPercent: 30,
+                    rangeDescription: '圆形扫描，反弹后覆盖传送门周围',
+                    waypoints: [ { xPercent: 35, yPercent: 35 } ],
+                    svgRange: { type: 'circle', radius: 13, stroke: '#f0b840' }
+                }]
+            }];
+
+            const mapListEl = document.getElementById('mapList');
+            const mapImage = document.getElementById('mapImage');
+            const mapContainer = document.getElementById('mapContainer');
+            const rangeSvg = document.getElementById('rangeSvg');
+            const spotTooltip = document.getElementById('spotTooltip');
+            const rangeDescLabel = document.getElementById('rangeDescLabel');
+            const overlay = document.getElementById('overlay');
+            const overlayImages = document.getElementById('overlayImages');
+            const overlayText = document.getElementById('overlayText');
+            const overlayClose = document.getElementById('overlayClose');
+            const coordToast = document.getElementById('coordToast');
+            const visionOverlay = document.getElementById('visionOverlay');
+            const visionImage = document.getElementById('visionImage');
+            const visionOverlayClose = document.getElementById('visionOverlayClose');
+
+            let currentMapIndex = 0;
+            let activeSpotId = null;
+            let currentHoveredSpot = null;
+            let currentVariantIdx = 0;
+            let isLocked = false;
+            let keyHandlerAttached = false;
+
+            function renderMapList() {
+                mapListEl.innerHTML = '';
+                mapsData.forEach((map, index) => {
+                    const card = document.createElement('div');
+                    card.className = 'map-card' + (index === currentMapIndex ? ' active' : '');
+                    card.textContent = map.name;
+                    card.addEventListener('click', () => {
+                        currentMapIndex = index;
+                        activeSpotId = null;
+                        closeOverlay();
+                        closeVisionOverlay();
+                        renderMapList();
+                        loadMap(map);
+                    });
+                    mapListEl.appendChild(card);
+                });
+            }
+
+            function loadMap(map) {
+                mapImage.src = map.imageUrl;
+                mapImage.alt = map.name;
+                    const mapViewport = document.getElementById('mapViewport');
+    if (map.backgroundUrl) {
+        mapViewport.style.backgroundImage = `url('${map.backgroundUrl}')`;
+        mapViewport.style.backgroundSize = 'cover';
+        mapViewport.style.backgroundPosition = 'center';
+        mapViewport.style.backgroundRepeat = 'no-repeat';
+    } else {
+        mapViewport.style.backgroundImage = 'none';
+    }
+                const oldMarkers = mapContainer.querySelectorAll('.spot-marker');
+                oldMarkers.forEach(m => m.remove());
+                rangeSvg.innerHTML = '';
+                isLocked = false;
+                currentVariantIdx = 0;
+
+                map.spots.forEach(spot => {
+                    const marker = document.createElement('div');
+                    marker.className = 'spot-marker';
+                    marker.style.left = spot.xPercent + '%';
+                    marker.style.top = spot.yPercent + '%';
+                    marker.style.color = spot.color;
+                    marker.dataset.spotId = spot.id;
+
+                    marker.addEventListener('mouseenter', (e) => {
+                        if (isLocked) return;
+                        currentHoveredSpot = spot;
+                        currentVariantIdx = 0;
+                        updateHoverDisplay();
+                        if (!keyHandlerAttached) {
+                            document.addEventListener('keydown', handleKeyDown);
+                            keyHandlerAttached = true;
+                        }
+                    });
+
+                    marker.addEventListener('mouseleave', () => {
+                        if (isLocked) return;
+                        spotTooltip.style.display = 'none';
+                        rangeDescLabel.style.display = 'none';
+                        clearRangeOnMap();
+                        currentHoveredSpot = null;
+                        document.removeEventListener('keydown', handleKeyDown);
+                        keyHandlerAttached = false;
+                    });
+
+                    marker.addEventListener('mousemove', (e) => {
+                        positionStandLabel(e, marker);
+                    });
+
+                    marker.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        openOverlay(spot);
+                    });
+                    mapContainer.appendChild(marker);
+                });
+
+                mapImage.onclick = (e) => {
+                    if (e.ctrlKey) {
+                        e.preventDefault();
+                        const rect = mapImage.getBoundingClientRect();
+                        const xPercent = ((e.clientX - rect.left) / rect.width * 100).toFixed(1);
+                        const yPercent = ((e.clientY - rect.top) / rect.height * 100).toFixed(1);
+                        console.log(`%c📍 坐标位置：X=${xPercent}% , Y=${yPercent}%`, 'color: #f0b840;');
+                        showCoordToast(`X=${xPercent}% , Y=${yPercent}%`);
+                        return;
+                    }
+                    if (activeSpotId) closeOverlay();
+                };
+            }
+
+            function positionStandLabel(e, marker) {
+                const rect = marker.getBoundingClientRect();
+                const containerRect = mapContainer.getBoundingClientRect();
+                const centerX = rect.left - containerRect.left + rect.width / 2;
+                const topY = rect.top - containerRect.top - 24;
+                spotTooltip.style.left = centerX + 'px';
+                spotTooltip.style.top = topY + 'px';
+            }
+
+            function positionImpactLabel(impactX, impactY) {
+                if (impactX === undefined || impactY === undefined) return;
+                const containerRect = mapContainer.getBoundingClientRect();
+                const mapRect = mapImage.getBoundingClientRect();
+                const left = (impactX / 100) * mapRect.width + (mapRect.left - containerRect.left);
+                const top = (impactY / 100) * mapRect.height + (mapRect.top - containerRect.top);
+                rangeDescLabel.style.left = left + 'px';
+                rangeDescLabel.style.top = (top + 15) + 'px';
+            }
+
+            function getVariants(spot) {
+                if (spot.variants && spot.variants.length > 0) return spot.variants;
+                return [{
+                    impactXPercent: spot.impactXPercent,
+                    impactYPercent: spot.impactYPercent,
+                    rangeDescription: spot.rangeDescription || '',
+                    description: spot.description || '',
+                    waypoints: spot.waypoints || [],
+                    svgRange: spot.svgRange || { type: 'circle', radius: 20, stroke: '#0097a7' },
+                    standImageUrl: spot.standImageUrl,
+                    aimImageUrl: spot.aimImageUrl,
+                    visionImageUrl: spot.visionImageUrl || spot.aimImageUrl
+                }];
+            }
+
+            function updateHoverDisplay() {
+                if (!currentHoveredSpot) return;
+                const spot = currentHoveredSpot;
+                const variants = getVariants(spot);
+                const variant = variants[currentVariantIdx];
+
+                const total = variants.length;
+                if (total > 1) {
+                    spotTooltip.textContent = `${spot.label} (${currentVariantIdx + 1}/${total})`;
+                } else {
+                    spotTooltip.textContent = spot.label;
+                }
+                spotTooltip.style.display = 'block';
+
+                if (variant.rangeDescription) {
+                    rangeDescLabel.textContent = variant.rangeDescription;
+                    rangeDescLabel.style.display = 'block';
+                } else {
+                    rangeDescLabel.style.display = 'none';
+                }
+
+                drawRangeAndImpact(variant, spot);
+            }
+
+            function handleKeyDown(e) {
+                if (e.key === 'Tab') {
+                    if (!currentHoveredSpot) return;
+                    e.preventDefault();
+                    const variants = getVariants(currentHoveredSpot);
+                    if (variants.length <= 1) return;
+                    currentVariantIdx = (currentVariantIdx + 1) % variants.length;
+                    updateHoverDisplay();
+                } else if (e.key === ' ') {
+                    e.preventDefault();
+                    if (!currentHoveredSpot) return;
+                    isLocked = !isLocked;
+                    if (isLocked) {
+                        rangeSvg.style.pointerEvents = 'auto';
+                    } else {
+                        rangeSvg.style.pointerEvents = 'none';
+                        closeVisionOverlay();
+                        if (!currentHoveredSpot) {
+                            clearRangeOnMap();
+                        }
+                    }
+                }
+            }
+
+            function drawRangeAndImpact(variant, spot) {
+                if (!variant.svgRange || variant.svgRange.type !== 'circle') return;
+                if (variant.impactXPercent === undefined || variant.impactYPercent === undefined) return;
+                const { radius, stroke } = variant.svgRange;
+                const impactX = variant.impactXPercent;
+                const impactY = variant.impactYPercent;
+                const standX = spot.xPercent;
+                const standY = spot.yPercent;
+                const waypoints = variant.waypoints || [];
+
+                const svgNS = "http://www.w3.org/2000/svg";
+                rangeSvg.innerHTML = '';
+
+                const pointsArray = [];
+                pointsArray.push(`${standX},${standY}`);
+                if (waypoints && Array.isArray(waypoints)) {
+                    waypoints.forEach(p => pointsArray.push(`${p.xPercent},${p.yPercent}`));
+                }
+                pointsArray.push(`${impactX},${impactY}`);
+
+                const polyline = document.createElementNS(svgNS, 'polyline');
+                polyline.setAttribute('points', pointsArray.join(' '));
+                polyline.setAttribute('fill', 'none');
+                polyline.setAttribute('stroke', stroke);
+                polyline.setAttribute('stroke-width', '0.5');
+                polyline.setAttribute('stroke-linecap', 'round');
+                polyline.setAttribute('stroke-linejoin', 'round');
+                rangeSvg.appendChild(polyline);
+
+                const totalLength = polyline.getTotalLength();
+                if (totalLength > 0) {
+                    polyline.setAttribute('stroke-dasharray', totalLength);
+                    polyline.setAttribute('stroke-dashoffset', totalLength);
+                    const duration = 1000;
+                    const startTime = performance.now();
+                    function animate(now) {
+                        const elapsed = now - startTime;
+                        const progress = Math.min(elapsed / duration, 1);
+                        polyline.setAttribute('stroke-dashoffset', totalLength * (1 - progress));
+                        if (progress < 1) requestAnimationFrame(animate);
+                    }
+                    requestAnimationFrame(animate);
+                }
+
+                const circle = document.createElementNS(svgNS, 'circle');
+                circle.setAttribute('cx', impactX);
+                circle.setAttribute('cy', impactY);
+                circle.setAttribute('r', radius);
+                circle.setAttribute('fill', 'none');
+                circle.setAttribute('stroke', stroke);
+                circle.setAttribute('stroke-width', '1');
+                circle.style.cursor = 'pointer';
+                circle.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    if (isLocked) openVisionOverlay(variant, spot);
+                });
+                rangeSvg.appendChild(circle);
+
+                const crossSize = 1;
+                const crossThickness = '0.3';
+                const createLine = (x1, y1, x2, y2) => {
+                    const line = document.createElementNS(svgNS, 'line');
+                    line.setAttribute('x1', x1);
+                    line.setAttribute('y1', y1);
+                    line.setAttribute('x2', x2);
+                    line.setAttribute('y2', y2);
+                    line.setAttribute('stroke', stroke);
+                    line.setAttribute('stroke-width', crossThickness);
+                    line.style.cursor = 'pointer';
+                    line.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        if (isLocked) openVisionOverlay(variant, spot);
+                    });
+                    return line;
+                };
+                rangeSvg.appendChild(createLine(impactX - crossSize, impactY, impactX + crossSize, impactY));
+                rangeSvg.appendChild(createLine(impactX, impactY - crossSize, impactX, impactY + crossSize));
+
+                positionImpactLabel(impactX, impactY);
+            }
+
+            function clearRangeOnMap() {
+                if (!isLocked) {
+                    rangeSvg.innerHTML = '';
+                    rangeSvg.style.pointerEvents = 'none';
+                }
+            }
+
+            function openOverlay(spot) {
+                activeSpotId = spot.id;
+                const variants = getVariants(spot);
+                const idx = (currentHoveredSpot === spot) ? currentVariantIdx : 0;
+                const activeVariant = variants[idx] || variants[0];
+
+                const standImg = activeVariant.standImageUrl || spot.standImageUrl;
+                const aimImg = activeVariant.aimImageUrl || spot.aimImageUrl;
+                const descText = activeVariant.description || spot.description || '';
+
+                overlayImages.innerHTML = `
+                    <div class="overlay-img-wrapper" data-scale="1">
+                        <img src="${standImg}" alt="站位图" />
+                        <span style="color:#aaa; font-size:1rem;">站位视角</span>
+                    </div>
+                    <div class="overlay-img-wrapper" data-scale="1">
+                        <img src="${aimImg}" alt="瞄准图" />
+                        <span style="color:#aaa; font-size:1rem;">瞄准方向</span>
+                    </div>
+                `;
+                overlayText.textContent = descText;
+                overlay.classList.add('active');
+                overlay.scrollTop = 0;
+            }
+
+            function closeOverlay() {
+                overlay.classList.remove('active');
+                activeSpotId = null;
+            }
+
+            function openVisionOverlay(variant, spot) {
+                const visionImg = variant.visionImageUrl || spot.visionImageUrl || variant.aimImageUrl || spot.aimImageUrl;
+                visionImage.src = visionImg;
+                visionOverlay.classList.add('active');
+            }
+
+            function closeVisionOverlay() {
+                visionOverlay.classList.remove('active');
+            }
+
+            overlayClose.addEventListener('click', closeOverlay);
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) closeOverlay(); });
+            overlay.addEventListener('wheel', (e) => {
+                if (!overlay.classList.contains('active')) return;
+                const wrapper = e.target.closest('.overlay-img-wrapper');
+                if (!wrapper) return;
+                e.preventDefault();
+                let scale = parseFloat(wrapper.dataset.scale) || 1;
+                const delta = e.deltaY > 0 ? -0.1 : 0.1;
+                scale = Math.min(3, Math.max(0.5, scale + delta));
+                wrapper.style.transform = `scale(${scale})`;
+                wrapper.dataset.scale = scale;
+            }, { passive: false });
+
+            visionOverlayClose.addEventListener('click', closeVisionOverlay);
+            visionOverlay.addEventListener('click', (e) => { if (e.target === visionOverlay) closeVisionOverlay(); });
+            visionOverlay.addEventListener('wheel', (e) => {
+                if (!visionOverlay.classList.contains('active')) return;
+                const wrapper = e.target.closest('.vision-img-wrapper');
+                if (!wrapper) return;
+                e.preventDefault();
+                let scale = parseFloat(wrapper.dataset.scale) || 1;
+                const delta = e.deltaY > 0 ? -0.1 : 0.1;
+                scale = Math.min(3, Math.max(0.5, scale + delta));
+                wrapper.style.transform = `scale(${scale})`;
+                wrapper.dataset.scale = scale;
+            }, { passive: false });
+
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    closeOverlay();
+                    closeVisionOverlay();
+                } else if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+                    currentMapIndex = (currentMapIndex + 1) % mapsData.length;
+                    activeSpotId = null; closeOverlay(); closeVisionOverlay();
+                    renderMapList(); loadMap(mapsData[currentMapIndex]);
+                } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+                    currentMapIndex = (currentMapIndex - 1 + mapsData.length) % mapsData.length;
+                    activeSpotId = null; closeOverlay(); closeVisionOverlay();
+                    renderMapList(); loadMap(mapsData[currentMapIndex]);
+                }
+            });
+
+            function showCoordToast(text) {
+                coordToast.textContent = text;
+                coordToast.style.opacity = '1';
+                clearTimeout(window.toastTimer);
+                window.toastTimer = setTimeout(() => { coordToast.style.opacity = '0'; }, 2000);
+            }
+            const tipClose = document.getElementById('tipClose');
+const usageTip = document.getElementById('usageTip');
+if (tipClose) {
+    tipClose.addEventListener('click', () => {
+        usageTip.style.display = 'none';
+    });
+}
+
+            function init() {
+                renderMapList();
+                loadMap(mapsData[currentMapIndex]);
+            }
+            init();
+
+            console.log('🏹 猎枭点位查看器 最终版 已启动');
+        })();
+    </script>
+</body>
+</html>
